@@ -1,12 +1,19 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.categories import MEMBER_CATEGORIES, normalise_categories
 from app.core.deps import get_current_admin
+from app.core.uploads import (
+    MAX_UPLOAD_BYTES,
+    UPLOAD_URL_PREFIX,
+    build_stored_name,
+    detect_extension,
+    ensure_upload_dir,
+)
 from app.core.industries import normalise_industries
 from app.core.security import hash_password
 from app.db.session import get_db
@@ -17,8 +24,14 @@ from app.models.event import Event, EventAgendaItem, EventSpeaker, RSVP
 from app.models.member import Member
 from app.schemas.article import ArticleIn, ArticleOut
 from app.schemas.contact import ContactOut, ContactStatusUpdate
-from app.schemas.connection import ConnectionReportOut
-from app.schemas.stats import ConnectionStats, ConnectorStat
+from app.schemas.connection import AdminConnectionOut, ConnectionReportOut
+from app.schemas.stats import (
+    ConnectionStats,
+    ConnectorStat,
+    MemberActivityOut,
+    MemberConnectionSummary,
+    MemberEventSummary,
+)
 from app.schemas.event import EventIn, EventOut, RSVPOut
 from app.schemas.member import MemberActiveUpdate, MemberAdminCreateRequest, MemberOut
 from app.schemas.stats import (
@@ -572,3 +585,262 @@ async def mark_report_reviewed(
     report.reviewed = True
     await db.commit()
     return {"detail": "Report marked as reviewed"}
+
+
+# Fields a directory listing needs to be worth reading. Used to score completeness, which
+# is the quickest explanation for "why is nobody connecting with this member".
+_PROFILE_FIELDS = [
+    ("company", "Company"),
+    ("bio", "Bio"),
+    ("interests", "Interests"),
+    ("phone", "Phone"),
+    ("linkedin", "LinkedIn"),
+    ("industries", "Sectors"),
+    ("categories", "Member type"),
+]
+
+
+@router.get("/members/{member_id}/activity", response_model=MemberActivityOut)
+async def get_member_activity(
+    member_id: int, db: AsyncSession = Depends(get_db)
+) -> MemberActivityOut:
+    """What a member has done: events, connections and reports."""
+    member = (
+        await db.execute(select(Member).where(Member.id == member_id))
+    ).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+
+    # Events. RSVPs are keyed by email, matched case-insensitively for the same reason the
+    # member-facing endpoint does it: the public form takes a free-typed address.
+    event_rows = (
+        await db.execute(
+            select(RSVP, Event)
+            .join(Event, Event.id == RSVP.event_id)
+            .where(func.lower(RSVP.email) == member.email.lower())
+            .order_by(RSVP.created_at.desc())
+        )
+    ).all()
+
+    seen_events: set[int] = set()
+    recent_events: list[MemberEventSummary] = []
+    attended = 0
+    for rsvp, event in event_rows:
+        if event.id in seen_events:
+            continue
+        seen_events.add(event.id)
+        did_attend = bool(event.has_happened and rsvp.rsvp != "cancelled")
+        attended += 1 if did_attend else 0
+        if len(recent_events) < 5:
+            recent_events.append(
+                MemberEventSummary(title=event.title, date=event.date, attended=did_attend)
+            )
+
+    # Connections, both directions.
+    conn_rows = (
+        await db.execute(
+            select(ConnectionRequest)
+            .where(
+                or_(
+                    ConnectionRequest.requester_id == member.id,
+                    ConnectionRequest.recipient_id == member.id,
+                )
+            )
+            .order_by(ConnectionRequest.created_at.desc())
+        )
+    ).scalars().all()
+
+    other_ids = {
+        r.recipient_id if r.requester_id == member.id else r.requester_id for r in conn_rows
+    }
+    others = (
+        (await db.execute(select(Member).where(Member.id.in_(other_ids)))).scalars().all()
+        if other_ids
+        else []
+    )
+    by_id = {m.id: m for m in others}
+
+    counts = {
+        "connections": 0,
+        "requests_sent": 0,
+        "requests_received": 0,
+        "pending_incoming": 0,
+        "pending_outgoing": 0,
+        "declined_by_them": 0,
+        "declined_by_others": 0,
+    }
+    recent_connections: list[MemberConnectionSummary] = []
+
+    for r in conn_rows:
+        outgoing = r.requester_id == member.id
+        other = by_id.get(r.recipient_id if outgoing else r.requester_id)
+
+        counts["requests_sent" if outgoing else "requests_received"] += 1
+        if r.status == ACCEPTED:
+            counts["connections"] += 1
+        elif r.status == PENDING:
+            counts["pending_outgoing" if outgoing else "pending_incoming"] += 1
+        elif r.status == DECLINED:
+            # Who did the declining, which is the difference between being turned down and
+            # turning people down.
+            counts["declined_by_others" if outgoing else "declined_by_them"] += 1
+
+        # No cap: an admin looking at one member wants the whole relationship history,
+        # not a sample of it. A member with hundreds of these is itself worth seeing.
+        if other is not None:
+            recent_connections.append(
+                MemberConnectionSummary(
+                    member_id=other.id,
+                    name=f"{other.first_name} {other.last_name}".strip(),
+                    email=other.email,
+                    company=other.company,
+                    status=r.status,
+                    direction="outgoing" if outgoing else "incoming",
+                    message=r.message,
+                    created_at=r.created_at,
+                    responded_at=r.responded_at,
+                )
+            )
+
+    reports_against = (
+        await db.execute(
+            select(func.count(ConnectionReport.id)).where(
+                ConnectionReport.reported_member_id == member.id
+            )
+        )
+    ).scalar_one()
+    reports_made = (
+        await db.execute(
+            select(func.count(ConnectionReport.id)).where(
+                ConnectionReport.reporter_id == member.id
+            )
+        )
+    ).scalar_one()
+
+    missing = [
+        label
+        for field, label in _PROFILE_FIELDS
+        if not getattr(member, field, None)
+    ]
+    completeness = round((len(_PROFILE_FIELDS) - len(missing)) / len(_PROFILE_FIELDS) * 100)
+
+    return MemberActivityOut(
+        member_id=member.id,
+        events_registered=len(seen_events),
+        events_attended=attended,
+        recent_events=recent_events,
+        recent_connections=recent_connections,
+        reports_against=reports_against,
+        reports_made=reports_made,
+        profile_completeness=completeness,
+        missing_fields=missing,
+        **counts,
+    )
+
+
+@router.get("/connections", response_model=list[AdminConnectionOut])
+async def list_all_connections(db: AsyncSession = Depends(get_db)) -> list[AdminConnectionOut]:
+    """Every connection request on the site, newest first.
+
+    Both parties are resolved here rather than returning ids, because the only useful view
+    of a connection is "who asked whom", and making the client join that itself would mean
+    shipping the whole member list to the browser.
+    """
+    requests = (
+        await db.execute(
+            select(ConnectionRequest).order_by(ConnectionRequest.created_at.desc())
+        )
+    ).scalars().all()
+    if not requests:
+        return []
+
+    member_ids = {r.requester_id for r in requests} | {r.recipient_id for r in requests}
+    members = (
+        (await db.execute(select(Member).where(Member.id.in_(member_ids)))).scalars().all()
+    )
+    by_id = {m.id: m for m in members}
+
+    reported_ids = {
+        row[0]
+        for row in (
+            await db.execute(select(ConnectionReport.request_id).distinct())
+        ).all()
+    }
+
+    def name(member_id: int) -> str:
+        m = by_id.get(member_id)
+        return f"{m.first_name} {m.last_name}".strip() if m else "Removed member"
+
+    def email(member_id: int) -> str:
+        m = by_id.get(member_id)
+        return m.email if m else ""
+
+    def company(member_id: int) -> str | None:
+        m = by_id.get(member_id)
+        return m.company if m else None
+
+    return [
+        AdminConnectionOut(
+            id=r.id,
+            status=r.status,
+            message=r.message,
+            created_at=r.created_at,
+            responded_at=r.responded_at,
+            requester_id=r.requester_id,
+            requester_name=name(r.requester_id),
+            requester_email=email(r.requester_id),
+            requester_company=company(r.requester_id),
+            recipient_id=r.recipient_id,
+            recipient_name=name(r.recipient_id),
+            recipient_email=email(r.recipient_id),
+            recipient_company=company(r.recipient_id),
+            reported=r.id in reported_ids,
+        )
+        for r in requests
+    ]
+
+
+@router.post("/uploads", status_code=status.HTTP_201_CREATED)
+async def upload_image(file: UploadFile = File(...)) -> dict[str, str]:
+    """Store an uploaded image and return the URL to reference it by.
+
+    Admin-only, via the router's dependency. The response is the public path, which is what
+    goes straight into an article's markup.
+    """
+    head = await file.read(32)
+    extension = detect_extension(head)
+    if extension is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That file is not a JPEG, PNG, GIF or WebP image.",
+        )
+
+    directory = ensure_upload_dir()
+    stored_name = build_stored_name(extension)
+    destination = directory / stored_name
+
+    written = len(head)
+    try:
+        with destination.open("wb") as out:
+            out.write(head)
+            # Streamed in chunks and checked as it goes, so an oversized file is rejected
+            # before it has all been written rather than after.
+            while chunk := await file.read(1024 * 256):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    out.close()
+                    destination.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Images must be under {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except OSError:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not save the image."
+        )
+
+    return {"url": f"{UPLOAD_URL_PREFIX}/{stored_name}", "filename": stored_name}

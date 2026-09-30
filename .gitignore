@@ -7,3 +7,6 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 .DS_Store
+
+# Runtime user uploads - served from disk, not part of the source tree
+uploads/

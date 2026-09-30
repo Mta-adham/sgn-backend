@@ -73,3 +73,25 @@ class ConnectionReportOut(BaseModel):
     # How many reports this member has against them in total. One report is a
     # disagreement; a pattern is the thing worth acting on.
     reports_against_member: int
+
+
+class AdminConnectionOut(BaseModel):
+    """One connection request as the admin sees it: both parties, named."""
+
+    id: int
+    status: str
+    message: str | None
+    created_at: datetime
+    responded_at: datetime | None
+
+    requester_id: int
+    requester_name: str
+    requester_email: str
+    requester_company: str | None
+
+    recipient_id: int
+    recipient_name: str
+    recipient_email: str
+    recipient_company: str | None
+
+    reported: bool = False

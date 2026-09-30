@@ -114,3 +114,53 @@ class StatsOut(BaseModel):
 
     # Recent activity feed
     recent_members: list[RecentMember] = []
+
+
+class MemberEventSummary(BaseModel):
+    title: str
+    date: str | None = None
+    attended: bool
+
+
+class MemberConnectionSummary(BaseModel):
+    member_id: int
+    name: str
+    email: str
+    company: str | None = None
+    status: str
+    direction: str
+    message: str | None = None
+    created_at: datetime
+    responded_at: datetime | None = None
+
+
+class MemberActivityOut(BaseModel):
+    """Everything this member has actually done, for the admin's member view.
+
+    Kept separate from the member record itself: the profile is what they told us, this is
+    what they did. The two answer different questions and a support conversation usually
+    needs the second.
+    """
+
+    member_id: int
+
+    events_registered: int = 0
+    events_attended: int = 0
+    recent_events: list[MemberEventSummary] = []
+
+    connections: int = 0
+    requests_sent: int = 0
+    requests_received: int = 0
+    pending_incoming: int = 0
+    pending_outgoing: int = 0
+    declined_by_them: int = 0
+    declined_by_others: int = 0
+    recent_connections: list[MemberConnectionSummary] = []
+
+    # Reports against them is the number that matters for moderation. Reports they made is
+    # context: someone who reports constantly is a different situation.
+    reports_against: int = 0
+    reports_made: int = 0
+
+    profile_completeness: int = 0
+    missing_fields: list[str] = []
