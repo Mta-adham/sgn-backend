@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sgn
+      POSTGRES_PASSWORD: sgn
+      POSTGRES_DB: sgn
+    ports:
+      - "5434:5432"
+    volumes:
+      - sgn_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sgn"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sgn_postgres_data:
