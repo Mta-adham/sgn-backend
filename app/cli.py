@@ -64,9 +64,9 @@ async def create_member(
         print(f"Created member '{email}'.")
 
 
-async def seed() -> None:
+async def seed(force: bool = False) -> None:
     async with SessionLocal() as db:
-        await seed_initial_data(db)
+        await seed_initial_data(db, force=force)
 
 
 async def seed_people(password: str) -> None:
@@ -94,7 +94,12 @@ def main() -> None:
     create_member_parser.add_argument("--last-name", default="Member")
     create_member_parser.add_argument("--tier", default="Basic Membership")
 
-    subparsers.add_parser("seed")
+    seed_parser = subparsers.add_parser("seed")
+    seed_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="seed even if events/articles already exist (duplicates edited content)",
+    )
 
     seed_members_parser = subparsers.add_parser(
         "seed-members", help="populate the database with 30 demo members (development only)"
@@ -116,7 +121,7 @@ def main() -> None:
             )
         )
     elif args.command == "seed":
-        asyncio.run(seed())
+        asyncio.run(seed(args.force))
     elif args.command == "seed-members":
         asyncio.run(seed_people(args.password))
 

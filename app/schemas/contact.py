@@ -1,12 +1,14 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class ContactIn(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
-    email: str
+    # Validated on the way in: this is a public, unauthenticated form, and an address
+    # nobody can reply to makes the message useless.
+    email: EmailStr
     company: str | None = None
     subject: str | None = None
     message: str | None = None

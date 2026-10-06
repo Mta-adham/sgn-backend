@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class SpeakerIn(BaseModel):
@@ -87,7 +87,10 @@ class EventOut(BaseModel):
 
 class RSVPRequest(BaseModel):
     event_id: int
-    email: str
+    # Validated, because this address is the only thing tying an RSVP to a member account
+    # (the member events endpoint matches on it). A typo here is an RSVP that silently
+    # never shows up on anyone's dashboard.
+    email: EmailStr
     names: str | None = None
     company: str | None = None
     price: str | None = None

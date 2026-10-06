@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.core.categories import normalise_categories
 from app.core.industries import normalise_industries
 from app.core.membership_tiers import MEMBERSHIP_TIER_PRICES_GBP
-from app.core.stripe_client import is_configured
+from app.core.stripe_client import is_configured, require_client_secret
 from app.db.session import get_db
 from app.models.article import Article
 from app.models.contact import Contact
@@ -157,7 +157,7 @@ async def create_membership_payment_intent(
         currency="gbp",
         metadata={"membershipTier": payload.membershipTier},
     )
-    return PaymentIntentResponse(clientSecret=intent.client_secret)
+    return PaymentIntentResponse(clientSecret=require_client_secret(intent))
 
 
 @router.post("/create-payment-intent-event", response_model=PaymentIntentResponse)
@@ -190,4 +190,4 @@ async def create_event_payment_intent(
         currency="gbp",
         metadata={"eventId": str(payload.eventId)},
     )
-    return PaymentIntentResponse(clientSecret=intent.client_secret)
+    return PaymentIntentResponse(clientSecret=require_client_secret(intent))

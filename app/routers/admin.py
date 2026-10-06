@@ -101,12 +101,15 @@ async def _connection_stats(db: AsyncSession, window_30d, window_60d) -> Connect
             .order_by(response_hours)
         )
     ).scalars().all()
+    # Coerced to float up front: the driver hands back Decimal for this expression, and
+    # Decimal + float is a TypeError, so averaging the middle pair of an even-sized list
+    # would blow up on mixed types.
+    hours = [float(gap) for gap in gaps]
     median_response_hours = None
-    if gaps:
-        mid = len(gaps) // 2
-        median_response_hours = round(
-            float(gaps[mid] if len(gaps) % 2 else (gaps[mid - 1] + gaps[mid]) / 2), 1
-        )
+    if hours:
+        mid = len(hours) // 2
+        median = hours[mid] if len(hours) % 2 else (hours[mid - 1] + hours[mid]) / 2
+        median_response_hours = round(median, 1)
 
     accepted_rows = (
         await db.execute(
@@ -122,14 +125,14 @@ async def _connection_stats(db: AsyncSession, window_30d, window_60d) -> Connect
             connected_ids.add(member_id)
             per_member[member_id] = per_member.get(member_id, 0) + 1
 
-    incoming_counts = dict(
-        (
-            await db.execute(
-                select(ConnectionRequest.recipient_id, func.count(ConnectionRequest.id))
-                .group_by(ConnectionRequest.recipient_id)
+    incoming_rows = (
+        await db.execute(
+            select(ConnectionRequest.recipient_id, func.count(ConnectionRequest.id)).group_by(
+                ConnectionRequest.recipient_id
             )
-        ).all()
-    )
+        )
+    ).all()
+    incoming_counts: dict[int, int] = {row[0]: row[1] for row in incoming_rows}
 
     interesting_ids = set(per_member) | set(incoming_counts)
     members = (
@@ -571,14 +574,14 @@ async def list_connection_reports(
     if not reports:
         return []
 
-    counts = dict(
-        (
-            await db.execute(
-                select(ConnectionReport.reported_member_id, func.count(ConnectionReport.id))
-                .group_by(ConnectionReport.reported_member_id)
+    count_rows = (
+        await db.execute(
+            select(ConnectionReport.reported_member_id, func.count(ConnectionReport.id)).group_by(
+                ConnectionReport.reported_member_id
             )
-        ).all()
-    )
+        )
+    ).all()
+    counts: dict[int, int] = {row[0]: row[1] for row in count_rows}
 
     member_ids = {r.reporter_id for r in reports} | {r.reported_member_id for r in reports}
     members = (

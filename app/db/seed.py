@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.categories import MEMBER_CATEGORIES
@@ -14,16 +15,41 @@ from app.models.event import Event, EventAgendaItem, EventSpeaker
 from app.models.member import Member
 
 
-async def seed_initial_data(db: AsyncSession) -> None:
+async def seed_initial_data(db: AsyncSession, force: bool = False) -> None:
+    """Load the starter events and articles into an *empty* database.
+
+    Only ever populates empty tables. Matching on title is not enough to make this safe
+    to re-run: once content has been edited through the admin panel - a title corrected,
+    an event renamed, an article rewritten - the seed row no longer matches, and a second
+    run silently inserts the stale original alongside the edited one. The table being
+    non-empty is the real signal that this data is now the admin's to manage, not ours.
+
+    Pass force=True to seed regardless, which is only sensible when you have just
+    deliberately emptied the tables.
+    """
+    event_count = (await db.execute(select(func.count(Event.id)))).scalar_one()
+    article_count = (await db.execute(select(func.count(Article.id)))).scalar_one()
+
+    if not force and (event_count or article_count):
+        print(
+            f"Database already has {event_count} event(s) and {article_count} article(s); "
+            "leaving them alone.\n"
+            "This content is managed through the admin panel once it exists. Re-seeding "
+            "would duplicate anything whose title has since been edited.\n"
+            "Pass --force if you have deliberately emptied the tables and want the "
+            "starter content back."
+        )
+        return
+
     for event_data in SEED_EVENTS:
         existing = await db.execute(select(Event).where(Event.title == event_data["title"]))
         if existing.scalar_one_or_none() is not None:
             print(f"Event '{event_data['title']}' already exists, skipping.")
             continue
 
-        data = dict(event_data)
-        speakers = data.pop("speakers", [])
-        agenda = data.pop("agenda", [])
+        data: dict[str, Any] = dict(event_data)
+        speakers: list[dict[str, Any]] = data.pop("speakers", [])
+        agenda: list[dict[str, Any]] = data.pop("agenda", [])
         event = Event(**data)
         event.speakers = [EventSpeaker(**speaker) for speaker in speakers]
         event.agenda = [
@@ -38,9 +64,10 @@ async def seed_initial_data(db: AsyncSession) -> None:
             print(f"Article '{article_data['title']}' already exists, skipping.")
             continue
 
-        data = dict(article_data)
-        data["created_at"] = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
-        db.add(Article(**data))
+        article: dict[str, Any] = dict(article_data)
+        created_at = str(article["created_at"])
+        article["created_at"] = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        db.add(Article(**article))
         print(f"Seeded article '{article_data['title']}'.")
 
     await db.commit()
