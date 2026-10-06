@@ -1,9 +1,8 @@
+import stripe
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-
-import stripe
 
 from app.core.categories import normalise_categories
 from app.core.industries import normalise_industries
@@ -12,11 +11,16 @@ from app.core.stripe_client import is_configured
 from app.db.session import get_db
 from app.models.article import Article
 from app.models.contact import Contact
-from app.models.event import Event, RSVP
+from app.models.event import RSVP, Event
 from app.models.member import Member
 from app.schemas.article import ArticleOut
 from app.schemas.contact import ContactIn, ContactOut
-from app.schemas.event import EventOut, PaymentIntentEventRequest, PaymentIntentResponse, RSVPRequest
+from app.schemas.event import (
+    EventOut,
+    PaymentIntentEventRequest,
+    PaymentIntentResponse,
+    RSVPRequest,
+)
 from app.schemas.member import MemberApplicationRequest, MemberOut
 from app.schemas.payment import MembershipPaymentIntentRequest
 
@@ -28,7 +32,11 @@ async def list_events(db: AsyncSession = Depends(get_db)) -> list[Event]:
     result = await db.execute(
         select(Event)
         .where(Event.published.is_(True))
-        .options(selectinload(Event.speakers), selectinload(Event.agenda), selectinload(Event.photos))
+        .options(
+            selectinload(Event.speakers),
+            selectinload(Event.agenda),
+            selectinload(Event.photos),
+        )
         .order_by(Event.id.desc())
     )
     return list(result.scalars().all())
@@ -47,7 +55,11 @@ async def get_event(event_id: int, db: AsyncSession = Depends(get_db)) -> Event:
     result = await db.execute(
         select(Event)
         .where(Event.id == event_id)
-        .options(selectinload(Event.speakers), selectinload(Event.agenda), selectinload(Event.photos))
+        .options(
+            selectinload(Event.speakers),
+            selectinload(Event.agenda),
+            selectinload(Event.photos),
+        )
     )
     event = result.scalar_one_or_none()
     if event is None:
@@ -128,11 +140,17 @@ async def create_membership_payment_intent(
             detail="Payment processing is not configured on this server yet.",
         )
     if payload.membershipTier not in MEMBERSHIP_TIER_PRICES_GBP:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown membership tier")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unknown membership tier",
+        )
 
     real_amount_pence = round(MEMBERSHIP_TIER_PRICES_GBP[payload.membershipTier] * 100)
     if real_amount_pence <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This tier does not require payment")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This tier does not require payment",
+        )
 
     intent = stripe.PaymentIntent.create(
         amount=real_amount_pence,
@@ -158,10 +176,14 @@ async def create_event_payment_intent(
 
     try:
         real_amount_pence = round(float(str(event.price).replace("£", "").strip()) * 100)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not paid")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not paid"
+        ) from exc
     if real_amount_pence <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event does not require payment")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This event does not require payment"
+        )
 
     intent = stripe.PaymentIntent.create(
         amount=real_amount_pence,

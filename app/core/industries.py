@@ -31,7 +31,11 @@ INDUSTRY_DEFINITIONS: list[dict] = [
 
     # --- Technology ---------------------------------------------------------------
     {"name": "Technology & Software", "group": "Technology & Digital", "vision_2030": True},
-    {"name": "Artificial Intelligence & Data", "group": "Technology & Digital", "vision_2030": True},
+    {
+        "name": "Artificial Intelligence & Data",
+        "group": "Technology & Digital",
+        "vision_2030": True,
+    },
     {"name": "Cybersecurity", "group": "Technology & Digital", "vision_2030": False},
     {"name": "Telecommunications", "group": "Technology & Digital", "vision_2030": False},
     {"name": "Gaming & Esports", "group": "Technology & Digital", "vision_2030": True},
@@ -43,13 +47,29 @@ INDUSTRY_DEFINITIONS: list[dict] = [
     {"name": "Islamic Finance", "group": "Financial Services", "vision_2030": False},
     {"name": "Fintech", "group": "Financial Services", "vision_2030": True},
     {"name": "Investment & Asset Management", "group": "Financial Services", "vision_2030": False},
-    {"name": "Venture Capital & Private Equity", "group": "Financial Services", "vision_2030": False},
+    {
+        "name": "Venture Capital & Private Equity",
+        "group": "Financial Services",
+        "vision_2030": False,
+    },
     {"name": "Insurance", "group": "Financial Services", "vision_2030": False},
 
     # --- Built environment and mobility -------------------------------------------
-    {"name": "Real Estate & Development", "group": "Infrastructure & Mobility", "vision_2030": True},
-    {"name": "Giga-projects & Smart Cities", "group": "Infrastructure & Mobility", "vision_2030": True},
-    {"name": "Construction & Engineering", "group": "Infrastructure & Mobility", "vision_2030": False},
+    {
+        "name": "Real Estate & Development",
+        "group": "Infrastructure & Mobility",
+        "vision_2030": True,
+    },
+    {
+        "name": "Giga-projects & Smart Cities",
+        "group": "Infrastructure & Mobility",
+        "vision_2030": True,
+    },
+    {
+        "name": "Construction & Engineering",
+        "group": "Infrastructure & Mobility",
+        "vision_2030": False,
+    },
     {"name": "Architecture & Design", "group": "Infrastructure & Mobility", "vision_2030": False},
     {"name": "Logistics & Supply Chain", "group": "Infrastructure & Mobility", "vision_2030": True},
     {"name": "Transport & Mobility", "group": "Infrastructure & Mobility", "vision_2030": False},
@@ -67,10 +87,18 @@ INDUSTRY_DEFINITIONS: list[dict] = [
 
     # --- Tourism, culture and lifestyle -------------------------------------------
     {"name": "Tourism & Hospitality", "group": "Tourism, Culture & Lifestyle", "vision_2030": True},
-    {"name": "Entertainment & Leisure", "group": "Tourism, Culture & Lifestyle", "vision_2030": True},
+    {
+        "name": "Entertainment & Leisure",
+        "group": "Tourism, Culture & Lifestyle",
+        "vision_2030": True,
+    },
     {"name": "Events & Experiences", "group": "Tourism, Culture & Lifestyle", "vision_2030": False},
     {"name": "Culture & Heritage", "group": "Tourism, Culture & Lifestyle", "vision_2030": True},
-    {"name": "Arts & Creative Industries", "group": "Tourism, Culture & Lifestyle", "vision_2030": False},
+    {
+        "name": "Arts & Creative Industries",
+        "group": "Tourism, Culture & Lifestyle",
+        "vision_2030": False,
+    },
     {"name": "Film, TV & Media", "group": "Tourism, Culture & Lifestyle", "vision_2030": True},
     {"name": "Music", "group": "Tourism, Culture & Lifestyle", "vision_2030": False},
     {"name": "Fashion & Luxury", "group": "Tourism, Culture & Lifestyle", "vision_2030": False},
@@ -89,7 +117,11 @@ INDUSTRY_DEFINITIONS: list[dict] = [
     {"name": "Education & Training", "group": "Public & Professional", "vision_2030": True},
     {"name": "Research & Academia", "group": "Public & Professional", "vision_2030": False},
     {"name": "Legal Services", "group": "Public & Professional", "vision_2030": False},
-    {"name": "Consulting & Professional Services", "group": "Public & Professional", "vision_2030": False},
+    {
+        "name": "Consulting & Professional Services",
+        "group": "Public & Professional",
+        "vision_2030": False,
+    },
     {"name": "Human Resources & Talent", "group": "Public & Professional", "vision_2030": False},
     {"name": "Marketing & Communications", "group": "Public & Professional", "vision_2030": False},
     {"name": "Non-profit & Social Impact", "group": "Public & Professional", "vision_2030": True},

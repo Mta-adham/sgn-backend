@@ -17,7 +17,9 @@ handles the rest.
 import re
 
 # A real address, and the usual ways of writing one to dodge a filter.
-_EMAIL = re.compile(r"[\w.+-]+\s*(?:@|\(at\)|\[at\]|\bat\b)\s*[\w-]+\s*(?:\.|\bdot\b)\s*\w{2,}", re.I)
+_EMAIL = re.compile(
+    r"[\w.+-]+\s*(?:@|\(at\)|\[at\]|\bat\b)\s*[\w-]+\s*(?:\.|\bdot\b)\s*\w{2,}", re.I
+)
 
 # Seven or more digits, however they are spaced or punctuated. Seven is the shortest real
 # subscriber number, and a lower threshold would reject things like years and figures.

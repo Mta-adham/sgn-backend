@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, or_, select
@@ -7,6 +7,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.categories import MEMBER_CATEGORIES, normalise_categories
 from app.core.deps import get_current_admin
+from app.core.industries import normalise_industries
+from app.core.security import hash_password
 from app.core.uploads import (
     MAX_UPLOAD_BYTES,
     UPLOAD_URL_PREFIX,
@@ -14,28 +16,31 @@ from app.core.uploads import (
     detect_extension,
     ensure_upload_dir,
 )
-from app.core.industries import normalise_industries
-from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.article import Article
+from app.models.connection import (
+    ACCEPTED,
+    DECLINED,
+    PENDING,
+    REPORTED,
+    ConnectionReport,
+    ConnectionRequest,
+)
 from app.models.contact import Contact
-from app.models.connection import ACCEPTED, DECLINED, PENDING, REPORTED, ConnectionReport, ConnectionRequest
-from app.models.event import Event, EventAgendaItem, EventPhoto, EventSpeaker, RSVP
+from app.models.event import RSVP, Event, EventAgendaItem, EventPhoto, EventSpeaker
 from app.models.member import Member
 from app.schemas.article import ArticleIn, ArticleOut
-from app.schemas.contact import ContactOut, ContactStatusUpdate
 from app.schemas.connection import AdminConnectionOut, ConnectionReportOut
+from app.schemas.contact import ContactOut, ContactStatusUpdate
+from app.schemas.event import EventIn, EventOut, RSVPOut
+from app.schemas.member import MemberActiveUpdate, MemberAdminCreateRequest, MemberOut
 from app.schemas.stats import (
+    CategoryCount,
     ConnectionStats,
     ConnectorStat,
     MemberActivityOut,
     MemberConnectionSummary,
     MemberEventSummary,
-)
-from app.schemas.event import EventIn, EventOut, RSVPOut
-from app.schemas.member import MemberActiveUpdate, MemberAdminCreateRequest, MemberOut
-from app.schemas.stats import (
-    CategoryCount,
     MessagesBreakdown,
     RecentMember,
     StatsOut,
@@ -70,7 +75,7 @@ async def _connection_stats(db: AsyncSession, window_30d, window_60d) -> Connect
     answered = accepted + declined + reported
     acceptance_rate = round(accepted / answered * 100, 1) if answered else None
 
-    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    week_ago = datetime.now(UTC) - timedelta(days=7)
     stale_pending = await count_where(
         ConnectionRequest.status == PENDING, ConnectionRequest.created_at < week_ago
     )
@@ -202,7 +207,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsOut:
         await db.execute(select(func.count(Contact.id)).where(Contact.status == "closed"))
     ).scalar_one()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     window_30d = now - timedelta(days=30)
     window_60d = now - timedelta(days=60)
     window_7d = now - timedelta(days=7)
@@ -323,7 +328,11 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsOut:
 async def list_events_admin(db: AsyncSession = Depends(get_db)) -> list[Event]:
     result = await db.execute(
         select(Event)
-        .options(selectinload(Event.speakers), selectinload(Event.agenda), selectinload(Event.photos))
+        .options(
+            selectinload(Event.speakers),
+            selectinload(Event.agenda),
+            selectinload(Event.photos),
+        )
         .order_by(Event.id.desc())
     )
     return list(result.scalars().all())
@@ -333,7 +342,11 @@ async def _get_event_or_404(event_id: int, db: AsyncSession) -> Event:
     result = await db.execute(
         select(Event)
         .where(Event.id == event_id)
-        .options(selectinload(Event.speakers), selectinload(Event.agenda), selectinload(Event.photos))
+        .options(
+            selectinload(Event.speakers),
+            selectinload(Event.agenda),
+            selectinload(Event.photos),
+        )
     )
     event = result.scalar_one_or_none()
     if event is None:
@@ -347,7 +360,8 @@ async def create_event(payload: EventIn, db: AsyncSession = Depends(get_db)) -> 
     event = Event(**data)
     event.speakers = [EventSpeaker(**s.model_dump(exclude={"id"})) for s in payload.speakers]
     event.agenda = [
-        EventAgendaItem(**a.model_dump(exclude={"id"}), order=i) for i, a in enumerate(payload.agenda)
+        EventAgendaItem(**a.model_dump(exclude={"id"}), order=i)
+        for i, a in enumerate(payload.agenda)
     ]
     # Order comes from the list position rather than the submitted value, so rearranging
     # in the editor is all it takes to rearrange the gallery.
@@ -360,7 +374,9 @@ async def create_event(payload: EventIn, db: AsyncSession = Depends(get_db)) -> 
 
 
 @router.put("/events/{event_id}", response_model=EventOut)
-async def update_event(event_id: int, payload: EventIn, db: AsyncSession = Depends(get_db)) -> Event:
+async def update_event(
+    event_id: int, payload: EventIn, db: AsyncSession = Depends(get_db)
+) -> Event:
     event = await _get_event_or_404(event_id, db)
     data = payload.model_dump(exclude={"speakers", "agenda", "photos"})
     for field, value in data.items():
@@ -368,7 +384,8 @@ async def update_event(event_id: int, payload: EventIn, db: AsyncSession = Depen
 
     event.speakers = [EventSpeaker(**s.model_dump(exclude={"id"})) for s in payload.speakers]
     event.agenda = [
-        EventAgendaItem(**a.model_dump(exclude={"id"}), order=i) for i, a in enumerate(payload.agenda)
+        EventAgendaItem(**a.model_dump(exclude={"id"}), order=i)
+        for i, a in enumerate(payload.agenda)
     ]
     # Order comes from the list position rather than the submitted value, so rearranging
     # in the editor is all it takes to rearrange the gallery.
@@ -382,7 +399,9 @@ async def update_event(event_id: int, payload: EventIn, db: AsyncSession = Depen
 @router.get("/events/{event_id}/rsvps", response_model=list[RSVPOut])
 async def list_event_rsvps(event_id: int, db: AsyncSession = Depends(get_db)) -> list[RSVPOut]:
     await _get_event_or_404(event_id, db)
-    result = await db.execute(select(RSVP).where(RSVP.event_id == event_id).order_by(RSVP.id.desc()))
+    result = await db.execute(
+        select(RSVP).where(RSVP.event_id == event_id).order_by(RSVP.id.desc())
+    )
     rsvps = result.scalars().all()
     return [
         RSVPOut(
@@ -467,7 +486,10 @@ async def create_member_admin(
 ) -> Member:
     existing = await db.execute(select(Member).where(Member.email == payload.email))
     if existing.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A member with this email already exists")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A member with this email already exists",
+        )
 
     data = payload.model_dump(exclude={"password"})
     data["categories"] = normalise_categories(data.get("categories"))
@@ -496,7 +518,7 @@ async def set_member_active(
 
     # Stamp the date they left the network on block; clear it if they are reinstated.
     if member.active and not payload.active:
-        member.blocked_at = datetime.now(timezone.utc)
+        member.blocked_at = datetime.now(UTC)
     elif payload.active:
         member.blocked_at = None
 
@@ -864,10 +886,10 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, str]:
                 out.write(chunk)
     except HTTPException:
         raise
-    except OSError:
+    except OSError as exc:
         destination.unlink(missing_ok=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not save the image."
-        )
+        ) from exc
 
     return {"url": f"{UPLOAD_URL_PREFIX}/{stored_name}", "filename": stored_name}

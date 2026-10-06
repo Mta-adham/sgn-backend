@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_, select
@@ -7,12 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.categories import MEMBER_CATEGORIES, normalise_categories
 from app.core.deps import get_current_member
 from app.core.industries import INDUSTRY_DEFINITIONS, normalise_industries
-from app.core.membership_tiers import MEMBERSHIP_TIER_PRICES_GBP
-from app.db.session import get_db
 from app.core.message_filter import check_message
+from app.db.session import get_db
 from app.models.connection import (
     ACCEPTED,
-    CONNECTION_STATUSES,
     DECLINED,
     PENDING,
     REPORT_REASONS,
@@ -41,7 +39,12 @@ router = APIRouter()
 
 # Tiers at this index or above (0-based, matching the frontend's membershipTiers array order)
 # get directory access. Index 1 = "Premium Membership".
-DIRECTORY_TIER_ORDER = ["Basic Membership", "Premium Membership", "Corporate Membership", "SGN Circle"]
+DIRECTORY_TIER_ORDER = [
+    "Basic Membership",
+    "Premium Membership",
+    "Corporate Membership",
+    "SGN Circle",
+]
 DIRECTORY_MIN_TIER_INDEX = 1
 
 
@@ -95,7 +98,10 @@ async def get_directory(
 ) -> list[Member]:
     # Reciprocal, tier-gated visibility, enforced server-side:
     # you only see the directory if your own tier grants access AND you've opted in yourself.
-    if not _has_directory_access(current_member.membership_tier) or not current_member.is_searchable:
+    if (
+        not _has_directory_access(current_member.membership_tier)
+        or not current_member.is_searchable
+    ):
         return []
 
     result = await db.execute(
@@ -367,7 +373,7 @@ async def respond_to_connection(
         )
 
     request.status = ACCEPTED if payload.accept else DECLINED
-    request.responded_at = datetime.now(timezone.utc)
+    request.responded_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(request)
 
@@ -426,6 +432,6 @@ async def report_connection(
         )
     )
     request.status = REPORTED
-    request.responded_at = datetime.now(timezone.utc)
+    request.responded_at = datetime.now(UTC)
     await db.commit()
     return {"detail": "Report received. The SGN team will review it."}

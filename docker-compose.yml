@@ -1,6 +1,12 @@
+# Local development database only. The credentials below are deliberately trivial and
+# the port is published to the host for psql access - neither is appropriate for a
+# deployed environment, which should use a managed Postgres instance instead.
 services:
   postgres:
     image: postgres:16-alpine
+    # Comes back after a reboot or a Docker restart, so the backend does not start up
+    # against a database that silently is not there.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: sgn
       POSTGRES_PASSWORD: sgn

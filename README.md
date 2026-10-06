@@ -85,9 +85,87 @@ first swapping in a test-mode publishable key too.
 pytest
 ```
 
+`tests/test_vocabulary_sync.py` compares the industry and category lists in `app/core/`
+against `sbn-website/src/memberCategories.js`. The backend drops values it does not
+recognise *silently*, so a sector added to the frontend picker alone would vanish on
+save with no error — this test turns that into a failure instead. It skips automatically
+if `sbn-website` is not checked out next to this repo.
+
 ## Lint / type-check
 
 ```bash
 ruff check .
 mypy app
 ```
+
+## Going live
+
+The server enforces its own production configuration. With `ENVIRONMENT=production` it
+refuses to start if `JWT_SECRET` is still the placeholder or too short, if `CORS_ORIGINS`
+contains `*`, or if any origin is plain http. Every problem is listed in one error, so
+one restart tells you everything that is wrong.
+
+Start from `.env.production.example`:
+
+```bash
+cp .env.production.example .env     # on the server, then fill it in
+python -c "import secrets; print(secrets.token_urlsafe(48))"   # JWT_SECRET
+```
+
+Then, on the server:
+
+```bash
+alembic upgrade head
+python -m app.cli create-admin --email you@saudiglobal.co --password '<strong password>'
+python -m app.cli seed          # real events/articles catalog
+uvicorn app.main:app --host 0.0.0.0 --port 8001
+```
+
+Do **not** run `seed-members` in production — it inserts 30 fictional people.
+
+### How the frontend finds the backend in production
+
+This matters more than it looks. `sbn-website` calls the API at the **relative** path
+`/api/...` (`const API_BASE = '/api'`), and the `"proxy": "http://localhost:8001"` in its
+`package.json` is **only used by `npm start`** — it has no effect on a production build.
+So a built frontend sends `/api/*` to whatever host served the page.
+
+That leaves two deployment shapes, and only one of them works as the code stands:
+
+1. **Same origin (works unchanged, recommended.)** One reverse proxy serves the built
+   frontend and forwards `/api/*` and `/uploads/*` to this backend. Relative paths resolve
+   correctly, and CORS stops mattering because it is no longer cross-origin. Sketch:
+
+   ```nginx
+   location /api/     { proxy_pass http://127.0.0.1:8001; }
+   location /uploads/ { proxy_pass http://127.0.0.1:8001; }
+   location /         { root /var/www/sbn-website/build; try_files $uri /index.html; }
+   ```
+
+2. **Separate domains (needs a frontend change.)** If the frontend is on a static host
+   (Netlify, Vercel, S3) and the backend on `api.saudiglobal.co`, every `/api/*` call hits
+   the static host and 404s. `sbn-website` would need its hardcoded `API_BASE` replaced
+   with an env-driven base URL (e.g. `process.env.REACT_APP_API_URL`), applied in all four
+   files that define it — `Event.js`, `EventDetail.js`, `Article.js`, `Contact.js` — plus
+   the components using literal `/api/...` paths. `CORS_ORIGINS` then has to list the
+   frontend's exact https origin.
+
+Option 1 needs no code changes on either side, which is why it is the recommendation.
+
+Still to be decided outside this repo:
+
+- **Hosting and process supervision.** `uvicorn --reload` is a development server. In
+  production run it under a supervisor (systemd, Docker with a restart policy, or a
+  platform like Railway/Render/Fly) so it comes back after a crash or reboot.
+- **TLS and a reverse proxy.** Terminate https in front of the app (nginx, Caddy, or the
+  platform's own router). `CORS_ORIGINS` must be https, so the frontend has to be served
+  over https too.
+- **Managed Postgres.** The `docker-compose.yml` database is for local development: the
+  password is `sgn` and the port is published to the host. Use a managed instance with
+  automated backups, and confirm a restore actually works before launch.
+- **`uploads/` is on local disk.** `POST /api/admin/uploads` writes to a directory served
+  as static files, so it does not survive a container rebuild and is not shared between
+  instances. Mount a persistent volume, or move to object storage before scaling past one
+  instance.
+- **Stripe keys must match modes.** A live secret key here requires a live publishable key
+  in `sbn-website/src/Member.js`, and vice versa. Mixed modes fail at payment time.

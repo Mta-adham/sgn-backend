@@ -38,6 +38,20 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's whole dependency-injection model is calls in argument defaults, so B008
+# fires on correct code. These are evaluated once at import and are not the mutable
+# default B008 exists to catch.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Query",
+    "fastapi.Security",
+]
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true

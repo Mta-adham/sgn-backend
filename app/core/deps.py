@@ -17,8 +17,13 @@ def _decode_or_401(credentials: HTTPAuthorizationCredentials | None) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         return decode_access_token(credentials.credentials)
-    except PyJWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    except PyJWTError as exc:
+        # `from exc` keeps the JWT failure in the traceback for the logs while the client
+        # still gets an opaque 401 - which of expiry, signature or malformed payload it
+        # was is not the caller's business.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
+        ) from exc
 
 
 async def get_current_admin(
@@ -31,7 +36,9 @@ async def get_current_admin(
     result = await db.execute(select(AdminUser).where(AdminUser.email == payload["sub"]))
     admin = result.scalar_one_or_none()
     if admin is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin account not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin account not found"
+        )
     return admin
 
 
@@ -45,5 +52,7 @@ async def get_current_member(
     result = await db.execute(select(Member).where(Member.email == payload["sub"]))
     member = result.scalar_one_or_none()
     if member is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Member account not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Member account not found"
+        )
     return member
