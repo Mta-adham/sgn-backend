@@ -18,6 +18,20 @@ class AgendaItemIn(BaseModel):
     time: str | None = None
 
 
+class PhotoIn(BaseModel):
+    url: str
+    caption: str | None = None
+    order: int = 0
+
+
+class PhotoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    url: str
+    caption: str | None
+    order: int
+
+
 class EventIn(BaseModel):
     title: str
     description: str | None = None
@@ -31,6 +45,7 @@ class EventIn(BaseModel):
     published: bool = True
     speakers: list[SpeakerIn] = []
     agenda: list[AgendaItemIn] = []
+    photos: list[PhotoIn] = []
 
 
 class SpeakerOut(BaseModel):
@@ -67,6 +82,7 @@ class EventOut(BaseModel):
     created_at: datetime
     speakers: list[SpeakerOut] = []
     agenda: list[AgendaItemOut] = []
+    photos: list[PhotoOut] = []
 
 
 class RSVPRequest(BaseModel):

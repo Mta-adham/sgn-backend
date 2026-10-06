@@ -28,7 +28,7 @@ async def list_events(db: AsyncSession = Depends(get_db)) -> list[Event]:
     result = await db.execute(
         select(Event)
         .where(Event.published.is_(True))
-        .options(selectinload(Event.speakers), selectinload(Event.agenda))
+        .options(selectinload(Event.speakers), selectinload(Event.agenda), selectinload(Event.photos))
         .order_by(Event.id.desc())
     )
     return list(result.scalars().all())
@@ -47,7 +47,7 @@ async def get_event(event_id: int, db: AsyncSession = Depends(get_db)) -> Event:
     result = await db.execute(
         select(Event)
         .where(Event.id == event_id)
-        .options(selectinload(Event.speakers), selectinload(Event.agenda))
+        .options(selectinload(Event.speakers), selectinload(Event.agenda), selectinload(Event.photos))
     )
     event = result.scalar_one_or_none()
     if event is None:

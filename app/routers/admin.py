@@ -20,7 +20,7 @@ from app.db.session import get_db
 from app.models.article import Article
 from app.models.contact import Contact
 from app.models.connection import ACCEPTED, DECLINED, PENDING, REPORTED, ConnectionReport, ConnectionRequest
-from app.models.event import Event, EventAgendaItem, EventSpeaker, RSVP
+from app.models.event import Event, EventAgendaItem, EventPhoto, EventSpeaker, RSVP
 from app.models.member import Member
 from app.schemas.article import ArticleIn, ArticleOut
 from app.schemas.contact import ContactOut, ContactStatusUpdate
@@ -323,7 +323,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsOut:
 async def list_events_admin(db: AsyncSession = Depends(get_db)) -> list[Event]:
     result = await db.execute(
         select(Event)
-        .options(selectinload(Event.speakers), selectinload(Event.agenda))
+        .options(selectinload(Event.speakers), selectinload(Event.agenda), selectinload(Event.photos))
         .order_by(Event.id.desc())
     )
     return list(result.scalars().all())
@@ -333,7 +333,7 @@ async def _get_event_or_404(event_id: int, db: AsyncSession) -> Event:
     result = await db.execute(
         select(Event)
         .where(Event.id == event_id)
-        .options(selectinload(Event.speakers), selectinload(Event.agenda))
+        .options(selectinload(Event.speakers), selectinload(Event.agenda), selectinload(Event.photos))
     )
     event = result.scalar_one_or_none()
     if event is None:
@@ -343,11 +343,16 @@ async def _get_event_or_404(event_id: int, db: AsyncSession) -> Event:
 
 @router.post("/events", response_model=EventOut, status_code=status.HTTP_201_CREATED)
 async def create_event(payload: EventIn, db: AsyncSession = Depends(get_db)) -> Event:
-    data = payload.model_dump(exclude={"speakers", "agenda"})
+    data = payload.model_dump(exclude={"speakers", "agenda", "photos"})
     event = Event(**data)
     event.speakers = [EventSpeaker(**s.model_dump(exclude={"id"})) for s in payload.speakers]
     event.agenda = [
         EventAgendaItem(**a.model_dump(exclude={"id"}), order=i) for i, a in enumerate(payload.agenda)
+    ]
+    # Order comes from the list position rather than the submitted value, so rearranging
+    # in the editor is all it takes to rearrange the gallery.
+    event.photos = [
+        EventPhoto(url=ph.url, caption=ph.caption, order=i) for i, ph in enumerate(payload.photos)
     ]
     db.add(event)
     await db.commit()
@@ -357,13 +362,18 @@ async def create_event(payload: EventIn, db: AsyncSession = Depends(get_db)) -> 
 @router.put("/events/{event_id}", response_model=EventOut)
 async def update_event(event_id: int, payload: EventIn, db: AsyncSession = Depends(get_db)) -> Event:
     event = await _get_event_or_404(event_id, db)
-    data = payload.model_dump(exclude={"speakers", "agenda"})
+    data = payload.model_dump(exclude={"speakers", "agenda", "photos"})
     for field, value in data.items():
         setattr(event, field, value)
 
     event.speakers = [EventSpeaker(**s.model_dump(exclude={"id"})) for s in payload.speakers]
     event.agenda = [
         EventAgendaItem(**a.model_dump(exclude={"id"}), order=i) for i, a in enumerate(payload.agenda)
+    ]
+    # Order comes from the list position rather than the submitted value, so rearranging
+    # in the editor is all it takes to rearrange the gallery.
+    event.photos = [
+        EventPhoto(url=ph.url, caption=ph.caption, order=i) for i, ph in enumerate(payload.photos)
     ]
     await db.commit()
     return await _get_event_or_404(event_id, db)
@@ -406,6 +416,23 @@ async def create_article(payload: ArticleIn, db: AsyncSession = Depends(get_db))
     await db.commit()
     await db.refresh(article)
     return article
+
+
+@router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_article(article_id: int, db: AsyncSession = Depends(get_db)) -> None:
+    """Permanently remove an article.
+
+    Unpublishing hides an article and is reversible, which covers most cases. This is for
+    the rest: a duplicate, a draft that will never run, something posted by mistake.
+    """
+    article = (
+        await db.execute(select(Article).where(Article.id == article_id))
+    ).scalar_one_or_none()
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+    await db.delete(article)
+    await db.commit()
 
 
 @router.put("/articles/{article_id}", response_model=ArticleOut)

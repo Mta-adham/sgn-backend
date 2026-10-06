@@ -29,6 +29,9 @@ class Event(Base):
         back_populates="event", cascade="all, delete-orphan", order_by="EventAgendaItem.order"
     )
     rsvps: Mapped[list["RSVP"]] = relationship(back_populates="event", cascade="all, delete-orphan")
+    photos: Mapped[list["EventPhoto"]] = relationship(
+        back_populates="event", cascade="all, delete-orphan", order_by="EventPhoto.order"
+    )
 
 
 class EventSpeaker(Base):
@@ -71,3 +74,23 @@ class RSVP(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     event: Mapped[Event] = relationship(back_populates="rsvps")
+
+
+class EventPhoto(Base):
+    """One photograph from an event.
+
+    Galleries previously lived only in the frontend catalog, which meant photos could only
+    be added by editing code and deploying. Any event created through the admin could never
+    have a gallery at all.
+    """
+
+    __tablename__ = "event_photos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), index=True)
+    url: Mapped[str] = mapped_column(String(500))
+    caption: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Explicit rather than relying on insertion order, so photos can be rearranged.
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    event: Mapped[Event] = relationship(back_populates="photos")
